@@ -1,7 +1,7 @@
 #the main file inside the src
 
 from appJar import gui
-from .game import game_gui
+from .game import game
 
 class Main:
     
@@ -16,7 +16,7 @@ class Main:
         else:
             self.app.stop()
             
-        game_app = game_gui.GameApp(type)
+        game_app = game.gameapp(type)
         
     def __init__(self):
         self.app = gui("Assignment 2","800x600")
