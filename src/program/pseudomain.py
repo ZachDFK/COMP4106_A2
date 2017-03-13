@@ -15,6 +15,7 @@ class Main:
             type = 2
         else:
             self.app.stop()
+            return
             
         game_app = game.gameapp(type)
         
