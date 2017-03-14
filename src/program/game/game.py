@@ -3,43 +3,70 @@
 from appJar import gui
 import random
 import copy
-import player
+from ..game import player
+import sys
+import threading
 
 class gameapp:
     
-    def __init__(self,type):
-        self.game_model = gamemodel()
+    def __init__(self,type,is_random):
+        self.game_model = gamemodel(is_random)
         self.game_control = gamecontroller(self.game_model)        
         self.game_view = gameview(self.game_model)
-        self.game_model.set_listener(self.game_view)
+        self.set_thread()        
+        self.game_model.set_listener(self.game_view,self.barrier)
         if type == 2:
             self.set_game_2ai()
         elif type == 1:
             self.set_game_1ai()
         else:
             self.set_game_0ai()
-    
+      
+        self.game_thread.start()                
+        self.run_view()
+    def run_threads(self):
+        threading._thread.start_new_thread(self.run_view,())
+        threading._thread.start_new_thread(self.run_game,())
+    def set_thread(self):
+        self.barrier = threading.Barrier(2)
+        self.game_thread = threading.Thread(None,self.run_game)
+        
     def set_game_0ai(self):
         self.player1 = player.playerhuman(1)
         self.player2 = player.playerhuman(2)
     def set_game_1ai(self):
         self.player1 = player.playerhuman(1)
-        self.player2 = player.playerai(1)
+        self.player2 = player.playerai(2)
         self.active_player = self.player1
     def set_game_2ai(self):
         self.player1 = player.playerai(1)
         self.player2 = player.playerai(2)
         self.active_player = self.player1
     def run_game(self):
-
+        turn = 0
+        self.active_player = self.player1
         while not (self.game_model.is_game_over()):
+            print(self.active_player.name)
+            
+            if self.active_player.is_ai:
+                self.active_player.make_move(self.game_model, 3, sys.maxsize , -sys.maxsize -1)
+                
+            else:
+                print("Wait for move")                
+                self.barrier.wait()
+                print("Move made")
+            turn +=1
             if turn%2 == 0 :
                 self.active_player = self.player1
             else:
-                self.active_player = self.player2
+                self.active_player = self.player2            
             
-            temp_move = player.pick_move(self.game_model)
-            print(self.game_model.active_player + " made move " + temp_move)        
+            self.game_model.active_player = self.active_player.color            
+            self.game_view.update_grid_layout_and_spares()
+        self.game_view.game_over_message()
+    def run_view(self):
+        self.game_view.gui.go()
+    
 class gameview:
     
     def __init__(self,game_model,type=0):
@@ -55,6 +82,7 @@ class gameview:
         self.locked_stack = False
         self.split_selected = False
         self.loc1_selected =  False
+        self.loc2_selected = False
         self.available_spaces = []
         
     def draw_grid_layout(self):
@@ -138,8 +166,8 @@ class gameview:
     
     
     def game_over_message(self):
-        self.gui.warningBox("Game Over", "Loser is player: " + self.game_model.active_player)
-        self.puzapp.setWarningBoxFunction("Game Over",self.gui.stop())
+        self.gui.warningBox("Game Over", "Winner is player  " + self.game_model.active_player)
+        self.gui.setWarningBoxFunction("Game Over",self.gui.stop())
     def show_stack(self,space):
         if self.locked_stack:
             return
@@ -167,7 +195,6 @@ class gameview:
             else:
                 self.split = int(split) - split_adjustment
             self.split_selected = True
-            print(self.split)
                   
             self.show_available_moves()
             self.locked_stack = False
@@ -192,17 +219,14 @@ class gameview:
         elif self.split_selected and space in self.available_spaces:
             self.loc2 = space
             result =  self.game_model.move_space(self.loc1,self.loc2,self.split)
+            self.loc2_selected = True
             self.reset_flags()
-            self.update_grid_layout_and_spares()
-            if result == "Done":
-                self.game_over_message()
+            
         elif self.loc1 == "spare":
             self.loc2 = space
             result = self.game_model.move_spare(self.loc2)
-            self.reset_flags()
-            self.update_grid_layout_and_spares()            
-            if result == "Done":
-                self.game_over_message()
+            self.loc2_selected = True
+            self.reset_flags()           
             
     def get_array_from_grid(self,space):
         row,col = space.split("-")
@@ -214,7 +238,7 @@ class gameview:
     def show_available_moves(self):
           
         self.available_spaces =  self.game_model.available_moves_from(self.loc1,self.split)
-        print(self.available_spaces)
+
         for row in range(0,8):
             for col in range(0,8):
                 space = str(row) + "-" + str(col)
@@ -227,8 +251,12 @@ class gamemodel:
         self.grid = self.initialize_grid(is_random)
         self.available_spaces = []
         self.active_player = "R"
-    def set_listener(self,game_view):
+        self.done_move = False
+        
+    def set_listener(self,game_view,barrier):
         self.game_view = game_view
+        self.barrier = barrier
+        
     def initialize_tokens(self):
         self.player_red_spare_tokens = []
         self.player_green_spare_tokens = []
@@ -246,7 +274,6 @@ class gamemodel:
                 
             self.grid_tokens.append(token)
             streak +=1
-        print(self.grid_tokens)
     def initialize_grid(self,is_random=False):
         
         row_len = 8
@@ -264,7 +291,7 @@ class gamemodel:
                 elif coor_str in outer_ring_list:
                     temp_row.append([])
                 else:
-                    temp_row.append([self.grab_token()])
+                    temp_row.append([self.grab_token(is_random)])
             grid.append(temp_row)
         
         return grid
@@ -319,7 +346,9 @@ class gamemodel:
         else:
             return True
         
-    def move_space(self,loc1,loc2,split):
+    def move_space(self,loc1,loc2,split,nai= True):
+        if(nai):
+            print("First click at: " + loc1 + ", Second click at: " + loc2 + ", with split: " + str(split))
         grid_array_l1 = self.get_array_from_grid(loc1)
         grid_array_l2 = self.get_array_from_grid(loc2)
         
@@ -340,10 +369,7 @@ class gamemodel:
         self.change_array_on_grid(loc1,grid_array_l1)
         self.change_array_on_grid(loc2,grid_array_l2)
         
-   
-        self.change_active_player()
-        if self.is_game_over():
-            return "Done"                
+        self.barrier.wait()
     def move_spare(self,space):
         grid_array_l2 = self.get_array_from_grid(space)        
         grid_array_l2.append(self.active_player)
@@ -361,21 +387,20 @@ class gamemodel:
         else:
             self.player_red_spare_tokens.pop()
             
-            
-       
-        self.change_active_player()
-        if self.is_game_over():
-            return "Done"        
+        self.barrier.wait()
+    
+    def stall_and_acquire(self):
+        for x in range(0,1000):
+            for y in range(0,50):
+                z = x*y
+        
+        self.semaphore.acquire()
     def change_array_on_grid(self,space,new_array):
         row,col = space.split("-")
         row = int(row)
         col = int(col)
         self.grid[row][col] = copy.deepcopy(new_array)
-    def change_active_player(self):
-        if self.active_player == "G":
-            self.active_player = "R"
-        else:
-            self.active_player = "G"
+   
     def get_array_from_grid(self,space):
         row,col = space.split("-")
         row = int(row)
@@ -384,6 +409,7 @@ class gamemodel:
         return grid_space_array
     
     def is_game_over(self):
+        
         if self.active_player == "G" and len(self.player_green_spare_tokens) != 0:
             return False
         elif self.active_player == "R" and len(self.player_red_spare_tokens) != 0:
@@ -399,7 +425,7 @@ class gamemodel:
                             return False
                     
             return True
-            
+    def get_available_location1(self,color):
 class gamecontroller:
     
     def __init__(self,gamemodel):
