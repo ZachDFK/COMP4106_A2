@@ -27,3 +27,8 @@ class playerai(player):
     
     
     def make_move_min_max():
+        pass
+class playerhuman(player):
+    
+    def __init__(self,num):
+        self.name = "HMN " + num

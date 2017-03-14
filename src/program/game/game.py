@@ -3,6 +3,7 @@
 from appJar import gui
 import random
 import copy
+import player
 
 class gameapp:
     
@@ -11,18 +12,34 @@ class gameapp:
         self.game_control = gamecontroller(self.game_model)        
         self.game_view = gameview(self.game_model)
         self.game_model.set_listener(self.game_view)
-        self.game_view.gui.go()
+        if type == 2:
+            self.set_game_2ai()
+        elif type == 1:
+            self.set_game_1ai()
+        else:
+            self.set_game_0ai()
     
+    def set_game_0ai(self):
+        self.player1 = player.playerhuman(1)
+        self.player2 = player.playerhuman(2)
+    def set_game_1ai(self):
+        self.player1 = player.playerhuman(1)
+        self.player2 = player.playerai(1)
+        self.active_player = self.player1
+    def set_game_2ai(self):
+        self.player1 = player.playerai(1)
+        self.player2 = player.playerai(2)
+        self.active_player = self.player1
     def run_game(self):
-        player1 = playerai(1)
-        player2 = playerai(2)
-        
-        while not (self.game_model.game_over()):
-            if turn%2 == 0 :
-                player = player1
-            else:
-                player = player2
 
+        while not (self.game_model.is_game_over()):
+            if turn%2 == 0 :
+                self.active_player = self.player1
+            else:
+                self.active_player = self.player2
+            
+            temp_move = player.pick_move(self.game_model)
+            print(self.game_model.active_player + " made move " + temp_move)        
 class gameview:
     
     def __init__(self,game_model,type=0):
@@ -122,7 +139,7 @@ class gameview:
     
     def game_over_message(self):
         self.gui.warningBox("Game Over", "Loser is player: " + self.game_model.active_player)
-        self.puzapp.setWarningBoxFunction("winLable",self.gui.stop())
+        self.puzapp.setWarningBoxFunction("Game Over",self.gui.stop())
     def show_stack(self,space):
         if self.locked_stack:
             return
