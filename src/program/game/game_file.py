@@ -31,6 +31,7 @@ class gameapp:
         self.barrier = threading.Barrier(2)
         self.game_thread = threading.Thread(None,self.run_game)
         
+        self.mlock = threading.Lock()        
     def set_game_0ai(self):
         self.player1 = player.playerhuman(1)
         self.player2 = player.playerhuman(2)
@@ -49,7 +50,10 @@ class gameapp:
             print(self.active_player.name)
             
             if self.active_player.is_ai:
-                self.active_player.make_move(self.game_model, 3, sys.maxsize , -sys.maxsize -1)
+                print("Looking...")
+                move_array = self.active_player.make_move(self.game_model, 0, -sys.maxsize -1, sys.maxsize )
+                print("Done looking")
+                self.game_model.make_ai_move(move_array)
                 
             else:
                 print("Wait for move")                
@@ -63,6 +67,8 @@ class gameapp:
             
             self.game_model.active_player = self.active_player.color            
             self.game_view.update_grid_layout_and_spares()
+            
+            
         self.game_view.game_over_message()
     def run_view(self):
         self.game_view.gui.go()
@@ -90,8 +96,8 @@ class gameview:
         self.gui.setSticky("news")        
         for row in range(0,8):
             for col in range(0,8):
-                titleStr = str(row)+ "-" + str(col)
-                grid_space_array = self.get_array_from_grid(titleStr)                
+                coor_str = str(row)+ "-" + str(col)
+                grid_space_array = self.get_array_from_grid(coor_str)                
                 self.gui.setSticky("news")
                 self.gui.setPadding([10,10])
                 self.gui.setInPadding([10,10])
@@ -107,19 +113,19 @@ class gameview:
                     else:
                         color = "green"
                 
-                self.gui.addLabel(titleStr,"",row,col)
-                self.gui.setLabelBg(titleStr,color)
+                self.gui.addLabel(coor_str,"",row,col)
+                self.gui.setLabelBg(coor_str,color)
                 if color != "lightgrey":
-                    self.gui.setLabelFunction(titleStr,self.select_space)
-                    self.gui.setLabelOverFunction(titleStr,self.show_stack)
+                    self.gui.setLabelFunction(coor_str,self.select_space)
+                    self.gui.setLabelOverFunction(coor_str,self.show_stack)
         
         self.gui.stopLabelFrame()
     
     def update_grid_layout_and_spares(self):
         for row in range(0,8):
             for col in range(0,8):
-                titleStr = str(row)+ "-" + str(col)
-                grid_space_array = self.get_array_from_grid(titleStr)                
+                coor_str = str(row)+ "-" + str(col)
+                grid_space_array = self.get_array_from_grid(coor_str)                
                 if len(grid_space_array) == 0: 
                     color = "black"                    
                 elif grid_space_array[0] == "X":
@@ -131,7 +137,7 @@ class gameview:
                         color = "red"
                     else:
                         color = "green"
-                self.gui.setLabelBg(titleStr,color)     
+                self.gui.setLabelBg(coor_str,color)     
         self.gui.setLabel("G",str(len(self.game_model.player_green_spare_tokens)))
         self.gui.setLabel("R",str(len(self.game_model.player_red_spare_tokens)))
         self.gui.setLabel("active_player","The active player is :" + self.game_model.active_player)
@@ -156,11 +162,11 @@ class gameview:
         self.gui.setSticky("news")              
         for index in range(0,5):
             color = "lightgrey"
-            titleStr = str(5-index)
+            coor_str = str(5-index)
             self.gui.setSticky("news")
-            self.gui.addLabel(titleStr,"",4-index,0)
-            self.gui.setLabelBg(titleStr,color)
-            self.gui.setLabelFunction(titleStr,self.select_split)
+            self.gui.addLabel(coor_str,"",4-index,0)
+            self.gui.setLabelBg(coor_str,color)
+            self.gui.setLabelFunction(coor_str,self.select_split)
         self.gui.stopLabelFrame()
     
     
@@ -181,9 +187,9 @@ class gameview:
                 else:
                     color = "red"
             
-            titleStr = str(5-index)
+            coor_str = str(5-index)
             self.gui.setSticky("news")
-            self.gui.setLabelBg(titleStr,color)
+            self.gui.setLabelBg(coor_str,color)
             
     
     def select_split(self, split):
@@ -252,9 +258,10 @@ class gamemodel:
         self.available_spaces = []
         self.active_player = "R"
         self.done_move = False
+        self.undo_stack = []
+        self.undo_stack.append([])
         
     def set_listener(self,game_view,barrier):
-        self.game_view = game_view
         self.barrier = barrier
         
     def initialize_tokens(self):
@@ -275,7 +282,7 @@ class gamemodel:
             self.grid_tokens.append(token)
             streak +=1
     def initialize_grid(self,is_random=False):
-        
+        self.game_space = []
         row_len = 8
         col_len = 8
         no_grid_list = ["00","01","06","07","10","17","60","67","70","71","76","77"]
@@ -290,8 +297,10 @@ class gamemodel:
                     temp_row.append(["X"])
                 elif coor_str in outer_ring_list:
                     temp_row.append([])
+                    self.game_space.append(coor_str)
                 else:
                     temp_row.append([self.grab_token(is_random)])
+                    self.game_space.append(coor_str)                    
             grid.append(temp_row)
         
         return grid
@@ -304,6 +313,26 @@ class gamemodel:
             return self.grid_tokens.pop()
         
     
+    def assemble_all_possible_combos_for_ai(self,color):
+        list_of_full_moves = []
+        list_of_loc1 = self.get_available_location1(color)
+        for loc1 in list_of_loc1:
+            for split in range(1,len(self.get_array_from_grid(loc1))+1):
+                list_of_loc2 = self.available_moves_from(loc1,split)
+                for loc2 in list_of_loc2:
+                    list_of_full_moves.append([loc1,loc2,split])
+        
+        if color == "G" and len(self.player_green_spare_tokens) != 0:
+            spare = True
+        elif color == "R" and len(self.player_red_spare_tokens) != 0:
+            spare = True
+        else:
+            spare = False
+        if spare:
+            for available_space in self.game_space:
+                space = available_space[0] + "-" + available_space[1]
+                list_of_full_moves.append(["spare",space])
+        return list_of_full_moves
     def available_moves_from(self,loc,split):
         row,col = loc.split("-")
         row = int(row)
@@ -346,12 +375,19 @@ class gamemodel:
         else:
             return True
         
-    def move_space(self,loc1,loc2,split,nai= True):
-        if(nai):
+    def move_space(self,loc1,loc2,split,nai= True,level = None) :
+        pushed_stack = []
+        outed_stack = []
+        added_stack = []
+        origin_split = split
+        origin_l1 = self.get_array_from_grid(loc1)    
+        origin_l2 = self.get_array_from_grid(loc2)        
+        if level == None:
             print("First click at: " + loc1 + ", Second click at: " + loc2 + ", with split: " + str(split))
         grid_array_l1 = self.get_array_from_grid(loc1)
         grid_array_l2 = self.get_array_from_grid(loc2)
-        
+        if(len(grid_array_l1) == 0):
+            print("oops")
         splited_array = []
         for num in range(0,split):
             splited_array.insert(0,grid_array_l1.pop())
@@ -359,36 +395,66 @@ class gamemodel:
             grid_array_l2.append(token)
         while len(grid_array_l2) > 5:
             temp_token = grid_array_l2.pop(0)
+            pushed_stack.append(temp_token)            
             if temp_token == "G":
                 if self.active_player == "G":   
                     self.player_green_spare_tokens.append(temp_token)
+                    added_stack.append(temp_token)
+                else:
+                    outed_stack.append(temp_token)
             else:
                 if self.active_player == "R":
                     self.player_red_spare_tokens.append(temp_token)
-        
+                    added_stack.append(temp_token)
+                else:
+                    outed_stack.append(temp_token)
         self.change_array_on_grid(loc1,grid_array_l1)
         self.change_array_on_grid(loc2,grid_array_l2)
+        if(nai):
+            self.barrier.wait()
+        if level != None:
+            if level != len(self.undo_stack):
+                self.undo_stack.append([])
+            self.undo_stack[level] = [origin_l1,origin_l2,added_stack]
+    def move_spare(self,space,nai=True,level = None):
+        pushed_stack = []
+        outed_stack = []
+        added_stack = []        
+        origin_l2 = self.get_array_from_grid(space)
+        if level == None:
+            print("Moved spare to location: " + space)
         
-        self.barrier.wait()
-    def move_spare(self,space):
-        grid_array_l2 = self.get_array_from_grid(space)        
+        grid_array_l2 = self.get_array_from_grid(space)
         grid_array_l2.append(self.active_player)
         while len(grid_array_l2) > 5:
             temp_token = grid_array_l2.pop(0)
+            pushed_stack.append(temp_token)            
             if temp_token == "G":
                 if self.active_player == "G":   
                     self.player_green_spare_tokens.append(temp_token)
+                    added_stack.append(temp_token)
+                else:
+                    outed_stack.append(temp_token)                    
             else:
                 if self.active_player == "R":
                     self.player_red_spare_tokens.append(temp_token)
+                    added_stack.append(temp_token)
+                else:
+                    outed_stack.append(temp_token)
+                    
         self.change_array_on_grid(space,grid_array_l2)
+        
         if self.active_player == "G":
             self.player_green_spare_tokens.pop()
         else:
             self.player_red_spare_tokens.pop()
-            
-        self.barrier.wait()
-    
+        
+        if(nai):
+            self.barrier.wait()
+        if level != None:
+            if level != len(self.undo_stack):
+                self.undo_stack.append([])
+            self.undo_stack[level] = ["spare",origin_l2,added_stack]            
     def stall_and_acquire(self):
         for x in range(0,1000):
             for y in range(0,50):
@@ -417,8 +483,8 @@ class gamemodel:
         else:
             for row in range(0,8):
                 for col in range(0,8):
-                    titleStr = str(row) + "-" + str(col)
-                    grid_space_array = self.get_array_from_grid(titleStr)
+                    coor_str = str(row) + "-" + str(col)
+                    grid_space_array = self.get_array_from_grid(coor_str)
                     if len(grid_space_array) >0:
                         last_element = grid_space_array.pop()
                         if last_element == self.active_player:
@@ -426,6 +492,74 @@ class gamemodel:
                     
             return True
     def get_available_location1(self,color):
+        available_loc1 = []
+        for row in range(0,8):
+            for col in range(0,8):
+                coor_str = str(row) + "-" + str(col)
+                grid_space_array = self.get_array_from_grid(coor_str)
+                if len(grid_space_array) >0:
+                    last_element = grid_space_array.pop()
+                    if last_element == color:
+                        available_loc1.append(coor_str)
+        return available_loc1
+    def get_number_of_tokens_for_color(self,color):
+        total_tokens = 0
+        for row in range(0,8): 
+            for col in range(0,8):
+                coor_str = str(row) + "-" + str(col)
+                grid_space_array = self.get_array_from_grid(coor_str)
+                for token in grid_space_array:
+                    if token == color:
+                        total_tokens += 1
+        if color == "G":
+            total_tokens + len(self.player_green_spare_tokens)
+        else:
+            total_tokens + len(self.player_red_spare_tokens)
+        return total_tokens
+    def get_spare_tokens_of_color(self,color):
+        if color == "G" :   
+            return self.player_green_spare_tokens
+        else:
+            return self.player_red_spare_tokens
+        
+    def make_ai_move(self,move_array):
+        if move_array[0][0] == "spare":
+            self.move_spare(move_array[0][1],False)
+        else:
+            self.move_space(move_array[0][0],move_array[0][1],move_array[0][2],False)
+    def save_state(gam_model):
+        new_game = gamemodel()
+        
+        new_game.active_player = copy.deepcopy(gam_model.active_player)
+        new_game.available_spaces = copy.deepcopy(gam_model.available_spaces)
+        new_game.barrier = copy.deepcopy(gam_model.barrier)
+        new_game.game_space = copy.deepcopy(gam_model.game_space)
+        new_game.grid = copy.deepcopy(gam_model.grid)
+        new_game.grid_tokens = copy.deepcopy(gam_model.grid_tokens)
+        new_game.player_green_spare_tokens = copy.deepcopy(gam_model.player_green_spare_tokens)
+        new_game.player_red_spare_tokens = copy.deepcopy(gam_model.player_red_spare_tokens)
+    
+    def undo_move(self,move_array,level):
+        origin_l1 = self.undo_stack[level][0]
+        origin_l2 = self.undo_stack[level][1]
+        added_stack = self.undo_stack[level][2]
+        if self.active_player == "G":
+            for token in added_stack:
+                self.player_green_spare_tokens.pop()
+        else:
+            for token in added_stack:
+                self.player_red_spare_tokens.pop()        
+        if move_array[0] == "spare":
+            if self.active_player == "G":
+                self.player_green_spare_tokens.append("G")
+            else:
+                self.player_red_spare_tokens.append("R")
+            
+        else:
+            self.change_array_on_grid(move_array[0], origin_l1)
+        
+        self.change_array_on_grid(move_array[1],origin_l2)
+           
 class gamecontroller:
     
     def __init__(self,gamemodel):
